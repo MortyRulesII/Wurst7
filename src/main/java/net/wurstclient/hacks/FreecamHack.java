@@ -1,231 +1,172 @@
-/*
- * Copyright (c) 2014-2025 Wurst-Imperium and contributors.
- *
- * This source code is subject to the terms of the GNU General Public
- * License, version 3. If a copy of the GPL was not distributed with this
- * file, You can obtain one at: https://www.gnu.org/licenses/gpl-3.0.txt
- */
-package net.wurstclient.hacks;
-
-import java.awt.Color;
-
-import org.joml.Matrix4f;
-import org.lwjgl.opengl.GL11;
-
-import com.mojang.blaze3d.systems.RenderSystem;
-
-import net.minecraft.client.gl.ShaderProgramKeys;
-import net.minecraft.client.network.ClientPlayerEntity;
-import net.minecraft.client.option.GameOptions;
-import net.minecraft.client.option.KeyBinding;
-import net.minecraft.client.render.BufferBuilder;
-import net.minecraft.client.render.BufferRenderer;
-import net.minecraft.client.render.Tessellator;
-import net.minecraft.client.render.VertexFormat;
-import net.minecraft.client.render.VertexFormats;
-import net.minecraft.client.util.math.MatrixStack;
+import net.minecraft.client.MinecraftClient;
+import net.minecraft.entity.EntityType;
+import net.minecraft.entity.mob.ZombieEntity;
 import net.minecraft.network.packet.c2s.play.PlayerMoveC2SPacket;
-import net.minecraft.util.math.Box;
+import net.minecraft.text.Text;
+import net.minecraft.util.Formatting;
 import net.minecraft.util.math.Vec3d;
-import net.wurstclient.Category;
-import net.wurstclient.SearchTags;
-import net.wurstclient.events.*;
-import net.wurstclient.hack.DontSaveState;
-import net.wurstclient.hack.Hack;
-import net.wurstclient.mixinterface.IKeyBinding;
-import net.wurstclient.settings.CheckboxSetting;
-import net.wurstclient.settings.ColorSetting;
-import net.wurstclient.settings.SliderSetting;
-import net.wurstclient.settings.SliderSetting.ValueDisplay;
-import net.wurstclient.util.FakePlayerEntity;
-import net.wurstclient.util.RegionPos;
-import net.wurstclient.util.RenderUtils;
-import net.wurstclient.util.RotationUtils;
+import net.minecraft.world.chunk.Chunk;
+import net.minecraft.world.chunk.ChunkStatus;
+import net.minecraft.world.gen.ChunkGenerator;
 
-@DontSaveState
-@SearchTags({"free camera", "spectator"})
-public final class FreecamHack extends Hack implements UpdateListener,
-	PacketOutputListener, IsPlayerInWaterListener, AirStrafingSpeedListener,
-	IsPlayerInLavaListener, CameraTransformViewBobbingListener,
-	IsNormalCubeListener, SetOpaqueCubeListener, RenderListener
-{
-	private final SliderSetting speed =
-		new SliderSetting("Speed", 1, 0.05, 10, 0.05, ValueDisplay.DECIMAL);
-	
-	private final CheckboxSetting tracer = new CheckboxSetting("Tracer",
-		"Draws a line to your character's actual position.", false);
-	
-	private final ColorSetting color =
-		new ColorSetting("Tracer color", Color.WHITE);
-	
-	private FakePlayerEntity fakePlayer;
-	
-	public FreecamHack()
-	{
-		super("Freecam");
-		setCategory(Category.RENDER);
-		addSetting(speed);
-		addSetting(tracer);
-		addSetting(color);
-	}
-	
-	@Override
-	protected void onEnable()
-	{
-		EVENTS.add(UpdateListener.class, this);
-		EVENTS.add(PacketOutputListener.class, this);
-		EVENTS.add(IsPlayerInWaterListener.class, this);
-		EVENTS.add(IsPlayerInLavaListener.class, this);
-		EVENTS.add(AirStrafingSpeedListener.class, this);
-		EVENTS.add(CameraTransformViewBobbingListener.class, this);
-		EVENTS.add(IsNormalCubeListener.class, this);
-		EVENTS.add(SetOpaqueCubeListener.class, this);
-		EVENTS.add(RenderListener.class, this);
-		
-		fakePlayer = new FakePlayerEntity();
-		
-		GameOptions opt = MC.options;
-		KeyBinding[] bindings = {opt.forwardKey, opt.backKey, opt.leftKey,
-			opt.rightKey, opt.jumpKey, opt.sneakKey};
-		
-		for(KeyBinding binding : bindings)
-			IKeyBinding.get(binding).resetPressedState();
-	}
-	
-	@Override
-	protected void onDisable()
-	{
-		EVENTS.remove(UpdateListener.class, this);
-		EVENTS.remove(PacketOutputListener.class, this);
-		EVENTS.remove(IsPlayerInWaterListener.class, this);
-		EVENTS.remove(IsPlayerInLavaListener.class, this);
-		EVENTS.remove(AirStrafingSpeedListener.class, this);
-		EVENTS.remove(CameraTransformViewBobbingListener.class, this);
-		EVENTS.remove(IsNormalCubeListener.class, this);
-		EVENTS.remove(SetOpaqueCubeListener.class, this);
-		EVENTS.remove(RenderListener.class, this);
-		
-		fakePlayer.resetPlayerPosition();
-		fakePlayer.despawn();
-		
-		ClientPlayerEntity player = MC.player;
-		player.setVelocity(Vec3d.ZERO);
-		
-		MC.worldRenderer.reload();
-	}
-	
-	@Override
-	public void onUpdate()
-	{
-		ClientPlayerEntity player = MC.player;
-		player.setVelocity(Vec3d.ZERO);
-		player.getAbilities().flying = false;
-		
-		player.setOnGround(false);
-		Vec3d velocity = player.getVelocity();
-		
-		if(MC.options.jumpKey.isPressed())
-			player.setVelocity(velocity.add(0, speed.getValue(), 0));
-		
-		if(MC.options.sneakKey.isPressed())
-			player.setVelocity(velocity.subtract(0, speed.getValue(), 0));
-	}
-	
-	@Override
-	public void onGetAirStrafingSpeed(AirStrafingSpeedEvent event)
-	{
-		event.setSpeed(speed.getValueF());
-	}
-	
-	@Override
-	public void onSentPacket(PacketOutputEvent event)
-	{
-		if(event.getPacket() instanceof PlayerMoveC2SPacket)
-			event.cancel();
-	}
-	
-	@Override
-	public void onIsPlayerInWater(IsPlayerInWaterEvent event)
-	{
-		event.setInWater(false);
-	}
-	
-	@Override
-	public void onIsPlayerInLava(IsPlayerInLavaEvent event)
-	{
-		event.setInLava(false);
-	}
-	
-	@Override
-	public void onCameraTransformViewBobbing(
-		CameraTransformViewBobbingEvent event)
-	{
-		if(tracer.isChecked())
-			event.cancel();
-	}
-	
-	@Override
-	public void onIsNormalCube(IsNormalCubeEvent event)
-	{
-		event.cancel();
-	}
-	
-	@Override
-	public void onSetOpaqueCube(SetOpaqueCubeEvent event)
-	{
-		event.cancel();
-	}
-	
-	@Override
-	public void onRender(MatrixStack matrixStack, float partialTicks)
-	{
-		if(fakePlayer == null || !tracer.isChecked())
-			return;
-		
-		// GL settings
-		GL11.glEnable(GL11.GL_BLEND);
-		GL11.glBlendFunc(GL11.GL_SRC_ALPHA, GL11.GL_ONE_MINUS_SRC_ALPHA);
-		GL11.glDisable(GL11.GL_DEPTH_TEST);
-		
-		matrixStack.push();
-		
-		RegionPos region = RenderUtils.getCameraRegion();
-		RenderUtils.applyRegionalRenderOffset(matrixStack, region);
-		
-		color.setAsShaderColor(0.5F);
-		
-		// box
-		matrixStack.push();
-		matrixStack.translate(fakePlayer.getX() - region.x(), fakePlayer.getY(),
-			fakePlayer.getZ() - region.z());
-		matrixStack.scale(fakePlayer.getWidth() + 0.1F,
-			fakePlayer.getHeight() + 0.1F, fakePlayer.getWidth() + 0.1F);
-		Box bb = new Box(-0.5, 0, -0.5, 0.5, 1, 0.5);
-		RenderUtils.drawOutlinedBox(bb, matrixStack);
-		matrixStack.pop();
-		
-		// line
-		Vec3d regionVec = region.toVec3d();
-		Vec3d start = RotationUtils.getClientLookVec(partialTicks)
-			.add(RenderUtils.getCameraPos()).subtract(regionVec);
-		Vec3d end = fakePlayer.getBoundingBox().getCenter().subtract(regionVec);
-		
-		Matrix4f matrix = matrixStack.peek().getPositionMatrix();
-		Tessellator tessellator = RenderSystem.renderThreadTesselator();
-		RenderSystem.setShader(ShaderProgramKeys.POSITION);
-		
-		BufferBuilder bufferBuilder = tessellator
-			.begin(VertexFormat.DrawMode.DEBUG_LINES, VertexFormats.POSITION);
-		bufferBuilder.vertex(matrix, (float)start.x, (float)start.y,
-			(float)start.z);
-		bufferBuilder.vertex(matrix, (float)end.x, (float)end.y, (float)end.z);
-		BufferRenderer.drawWithGlobalProgram(bufferBuilder.end());
-		
-		matrixStack.pop();
-		
-		// GL resets
-		RenderSystem.setShaderColor(1, 1, 1, 1);
-		GL11.glEnable(GL11.GL_DEPTH_TEST);
-		GL11.glDisable(GL11.GL_BLEND);
-	}
+public final class FreecamHack extends Hack implements UpdateListener, PacketOutputListener, RenderListener {
+
+    private FakePlayerEntity fakePlayer;
+    private ZombieEntity zombie;
+    private boolean isZombieActive = false;
+    private MinecraftClient client = MinecraftClient.getInstance();
+
+    public FreecamHack() {
+        super("Freecam");
+        setCategory(Category.RENDER);
+    }
+
+    @Override
+    protected void onEnable() {
+        // Register event listeners
+        EVENTS.add(UpdateListener.class, this);
+        EVENTS.add(PacketOutputListener.class, this);
+        EVENTS.add(RenderListener.class, this);
+
+        fakePlayer = new FakePlayerEntity();
+
+        // Spawn zombie named "George" in place of the player
+        if (MC.world != null && !isZombieActive) {
+            spawnZombie();
+        }
+
+        // Reset keybindings and prevent normal player movement
+        resetKeyBindings();
+    }
+
+    private void spawnZombie() {
+        // Create a zombie entity named "George"
+        zombie = new ZombieEntity(EntityType.ZOMBIE, MC.world);
+        zombie.setCustomName(Text.literal("George").formatted(Formatting.GREEN));
+        zombie.setCustomNameVisible(true);
+
+        // Set the zombie's position to the fake player's position
+        zombie.setPos(fakePlayer.getX(), fakePlayer.getY(), fakePlayer.getZ());
+
+        // Spawn the zombie in the world
+        MC.world.spawnEntity(zombie);
+        isZombieActive = true;
+    }
+
+    @Override
+    protected void onDisable() {
+        // Remove event listeners and reset player position
+        EVENTS.remove(UpdateListener.class, this);
+        EVENTS.remove(PacketOutputListener.class, this);
+        EVENTS.remove(RenderListener.class, this);
+
+        if (isZombieActive && zombie != null) {
+            MC.world.removeEntity(zombie.getId());
+        }
+
+        fakePlayer.resetPlayerPosition();
+        fakePlayer.despawn();
+        MC.player.setVelocity(Vec3d.ZERO);
+        MC.worldRenderer.reload();
+    }
+
+    @Override
+    public void onUpdate() {
+        ClientPlayerEntity player = MC.player;
+
+        // Keep the player in the same position as the fake player
+        player.setPosition(fakePlayer.getX(), fakePlayer.getY(), fakePlayer.getZ());
+        player.setVelocity(Vec3d.ZERO); // No movement while in Freecam mode
+
+        // Ensure the player can freely look around but remains in the same position
+        player.getAbilities().flying = true;
+
+        // Sync fake player position with the zombie to simulate a normal player's location
+        fakePlayer.setPosition(player.getX(), player.getY(), player.getZ());
+        zombie.setPos(fakePlayer.getX(), fakePlayer.getY(), fakePlayer.getZ());
+
+        // Force chunk loading around the fake player's position
+        forceChunkLoadingAroundFakePlayer();
+    }
+
+    // Force chunks to load based on the fake player's position
+    private void forceChunkLoadingAroundFakePlayer() {
+        int radius = 5; // Adjust the radius as needed to load more chunks around the fake player
+        int chunkX = (int) fakePlayer.getX() >> 4;
+        int chunkZ = (int) fakePlayer.getZ() >> 4;
+
+        // Load chunks around the fake player's position
+        for (int x = -radius; x <= radius; x++) {
+            for (int z = -radius; z <= radius; z++) {
+                Chunk chunk = client.world.getChunk(chunkX + x, chunkZ + z, ChunkStatus.FULL, true);
+                if (chunk != null) {
+                    // Trigger the chunk load for rendering and generation around Freecam
+                    client.world.getChunkManager().getLightingProvider().updateLighting(chunk);
+                }
+            }
+        }
+    }
+
+    @Override
+    public void onSentPacket(PacketOutputEvent event) {
+        // Cancel movement packets to prevent detection
+        if (event.getPacket() instanceof PlayerMoveC2SPacket) {
+            event.cancel();
+        }
+    }
+
+    @Override
+    public void onRender(MatrixStack matrixStack, float partialTicks) {
+        if (fakePlayer == null) return;
+
+        // Render the zombie (George) instead of the player
+        GL11.glEnable(GL11.GL_BLEND);
+        GL11.glBlendFunc(GL11.GL_SRC_ALPHA, GL11.GL_ONE_MINUS_SRC_ALPHA);
+        GL11.glDisable(GL11.GL_DEPTH_TEST);
+
+        matrixStack.push();
+
+        RegionPos region = RenderUtils.getCameraRegion();
+        RenderUtils.applyRegionalRenderOffset(matrixStack, region);
+
+        // Draw an outline around the zombie (George)
+        color.setAsShaderColor(0.5F);
+
+        matrixStack.push();
+        matrixStack.translate(zombie.getX() - region.x(), zombie.getY(), zombie.getZ() - region.z());
+        matrixStack.scale(zombie.getWidth() + 0.1F, zombie.getHeight() + 0.1F, zombie.getWidth() + 0.1F);
+        Box bb = new Box(-0.5, 0, -0.5, 0.5, 1, 0.5);
+        RenderUtils.drawOutlinedBox(bb, matrixStack);
+        matrixStack.pop();
+
+        Vec3d regionVec = region.toVec3d();
+        Vec3d start = RotationUtils.getClientLookVec(partialTicks)
+            .add(RenderUtils.getCameraPos()).subtract(regionVec);
+        Vec3d end = zombie.getBoundingBox().getCenter().subtract(regionVec);
+
+        Matrix4f matrix = matrixStack.peek().getPositionMatrix();
+        Tessellator tessellator = RenderSystem.renderThreadTesselator();
+        RenderSystem.setShader(ShaderProgramKeys.POSITION);
+
+        BufferBuilder bufferBuilder = tessellator
+            .begin(VertexFormat.DrawMode.DEBUG_LINES, VertexFormats.POSITION);
+        bufferBuilder.vertex(matrix, (float)start.x, (float)start.y, (float)start.z);
+        bufferBuilder.vertex(matrix, (float)end.x, (float)end.y, (float)end.z);
+        BufferRenderer.drawWithGlobalProgram(bufferBuilder.end());
+
+        matrixStack.pop();
+
+        RenderSystem.setShaderColor(1, 1, 1, 1);
+        GL11.glEnable(GL11.GL_DEPTH_TEST);
+        GL11.glDisable(GL11.GL_BLEND);
+    }
+
+    // Ensure that death messages from the zombie (George) are natural
+    @Override
+    public void onDeath(DeathEvent event) {
+        if (event.getEntity() instanceof PlayerEntity) {
+            // Change the death message to appear as if killed by "George" (Zombie)
+            event.setDeathMessage(Text.literal("Player was slain by Zombie George"));
+        }
+    }
 }
